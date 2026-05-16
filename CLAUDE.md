@@ -84,6 +84,10 @@ Default = Pattern A (Bridge proxy). Cognis portal calls Bridge, Bridge holds RAG
 
 Pattern B (Flask middleware in this repo) only if direct RAGFlow UI access is required for "knowledge base inspection" / debug surface for ops. One file: `api/cognis/cognis_auth.py`.
 
+## Cost policy
+
+This fork inherits Cognis's managed-SaaS cost policy — see `../cognis-platform/docs/specs/cost-policy.md` for the full per-fork list and rationale. For `cognis-brain-ragflow` specifically, in production deploys verify that `LANGFUSE_HOST`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` point at the Cognis-internal Langfuse self-host — NOT `cloud.langfuse.com`. RAGFlow ships the Langfuse SDK; misconfiguration leaks observability spend.
+
 ## What NOT to do
 
 - Don't run RAGFlow's hosted-product onboarding scripts (cloud.ragflow.io configs are not for us)
