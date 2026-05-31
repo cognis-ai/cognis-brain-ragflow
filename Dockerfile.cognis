@@ -1,0 +1,40 @@
+# =============================================================================
+# Cognis Knowledge — RAGFlow image
+# Wraps upstream RAGFlow with the Cognis Clerk-JWT hook + LiteLLM provider
+# + branding env defaults. Cost-policy: Langfuse points at self-host only.
+# =============================================================================
+FROM infiniflow/ragflow:dev-slim
+
+LABEL maintainer="Cognis AI <support@cognisai.com>"
+LABEL org.opencontainers.image.source="https://github.com/cognis-ai/cognis-brain-ragflow"
+LABEL org.opencontainers.image.title="Cognis Knowledge"
+LABEL org.opencontainers.image.description="Cognis Knowledge document-Q&A. Forked from infiniflow/ragflow (Apache-2.0). Clerk auth, LiteLLM-routed LLM, Cognis brand."
+LABEL org.opencontainers.image.vendor="Cognis AI"
+
+ENV COGNIS_BRANDING=on \
+    COGNIS_PRODUCT_NAME="Cognis Knowledge" \
+    COGNIS_DOCS_URL="https://cognisai.com/docs/knowledge" \
+    COGNIS_PORTAL_URL="https://app.cognisai.com/dashboard/knowledge" \
+    COGNIS_SUPPORT_EMAIL="support@cognisai.com" \
+    COGNIS_LLM_GATEWAY="https://llm.cognisai.com/v1"
+
+# Bake the Cognis subpackages into the upstream paths so import works
+# without modifying upstream PYTHONPATH.
+COPY api/cognis /ragflow/api/cognis
+COPY rag/llm/cognis_provider.py /ragflow/rag/llm/cognis_provider.py
+
+# Note: upstream's ragflow_server.py needs ONE line added to wire the
+# Cognis auth hook + LLM factory. We do it via an entrypoint shim so the
+# upstream file stays untouched (no fork-diff in app source).
+COPY <<'EOF' /ragflow/cognis_entrypoint.sh
+#!/bin/sh
+set -e
+# Wire Cognis auth + LLM provider into the running app without editing
+# upstream sources. Runs once per pod boot.
+python -c "from api.cognis.cognis_auth import register_cognis_auth; print('cognis_auth ready')"
+python -c "from rag.llm.cognis_provider import register_cognis_provider; register_cognis_provider(); print('cognis_provider registered')"
+exec /ragflow/entrypoint.sh "$@"
+EOF
+RUN chmod +x /ragflow/cognis_entrypoint.sh
+
+ENTRYPOINT ["/ragflow/cognis_entrypoint.sh"]
