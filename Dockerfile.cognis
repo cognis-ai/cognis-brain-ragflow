@@ -23,6 +23,14 @@ ENV COGNIS_BRANDING=on \
 COPY api/cognis /ragflow/api/cognis
 COPY rag/llm/cognis_provider.py /ragflow/rag/llm/cognis_provider.py
 
+# Web UI: upstream's compose bind-mounts these nginx configs into the
+# container; our platform compose doesn't, so without them nginx serves the
+# stock welcome page on :80. Bake the UNMODIFIED upstream files in instead
+# (zero fork-diff — they come straight from docker/nginx/).
+COPY docker/nginx/nginx.conf /etc/nginx/nginx.conf
+COPY docker/nginx/proxy.conf /etc/nginx/proxy.conf
+COPY docker/nginx/ragflow.conf.python /etc/nginx/conf.d/ragflow.conf
+
 # Note: upstream's ragflow_server.py needs ONE line added to wire the
 # Cognis auth hook + LLM factory. We do it via an entrypoint shim so the
 # upstream file stays untouched (no fork-diff in app source).
@@ -33,6 +41,20 @@ set -e
 # upstream sources. Runs once per pod boot.
 python -c "from api.cognis.cognis_auth import register_cognis_auth; print('cognis_auth ready')"
 python -c "from rag.llm.cognis_provider import register_cognis_provider; register_cognis_provider(); print('cognis_provider registered')"
+# Brand the prebuilt web bundle in place instead of rebuilding it: rewrite
+# the display name (title/wordmark/UI copy) in the dist before nginx starts.
+# Case-sensitive 'RAGFlow' only matches display strings (verified: i18n copy,
+# <title>, welcome banner) — lowercase code identifiers/URLs are untouched.
+# Idempotent: after the first pass grep finds nothing. LICENSE/NOTICE files
+# and Apache-2.0 attributions live outside web/dist and are never modified.
+if [ "${COGNIS_BRANDING:-}" = "on" ]; then
+  COGNIS_NAME="${COGNIS_PRODUCT_NAME:-Cognis Knowledge}"
+  # *.json covers conf.json — the runtime config whose appName feeds the
+  # navbar wordmark (<span class="appName...">{o.appName}</span>).
+  grep -rl --include='*.js' --include='*.html' --include='*.svg' --include='*.json' 'RAGFlow' /ragflow/web/dist 2>/dev/null \
+    | while read -r f; do sed -i "s/RAGFlow/${COGNIS_NAME}/g" "$f"; done
+  echo "cognis branding applied to web dist (${COGNIS_NAME})"
+fi
 exec /ragflow/entrypoint.sh "$@"
 EOF
 RUN chmod +x /ragflow/cognis_entrypoint.sh
