@@ -1,0 +1,15 @@
+{
+  "name": "cognis-knowledge-e2e",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Playwright e2e for Cognis Knowledge (RAGFlow fork) — native auth, knowledge-base flow, brand integrity.",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.1"
+  }
+}
