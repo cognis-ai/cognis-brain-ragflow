@@ -1,0 +1,42 @@
+# Brand-layer guard for the Cognis Knowledge fork.
+#
+# Gate 2 (2026-06-10) condition on theming-spec B3.1: the "diff the two
+# service-conf templates at every rebase" note must be a SCRIPTED check, not
+# prose. This workflow runs it on every PR/push that touches the brand layer
+# or the upstream template (i.e. every rebase lands here too).
+#
+# The full Playwright branding suite (G1-G5, G7) needs a live :9382 instance
+# and stays a rebase/rebuild acceptance step per the spec's gate policy —
+# this workflow only covers the checks that run without infrastructure.
+name: Brand guard
+
+on:
+  pull_request:
+    branches: [cognis/main]
+    paths:
+      - 'Dockerfile.cognis'
+      - 'cognis-brand-assets/**'
+      - 'docker/service_conf.yaml.template'
+      - 'tools/check_conf_template_drift.py'
+      - '.github/workflows/brand-guard.yml'
+  push:
+    branches: [cognis/main]
+    paths:
+      - 'Dockerfile.cognis'
+      - 'cognis-brand-assets/**'
+      - 'docker/service_conf.yaml.template'
+      - 'tools/check_conf_template_drift.py'
+      - '.github/workflows/brand-guard.yml'
+
+jobs:
+  conf-template-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+
+      - name: Check service-conf template drift (B3.1 gate)
+        run: python tools/check_conf_template_drift.py

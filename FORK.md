@@ -52,6 +52,18 @@ Every entry must stay minimal, carry its justification, and be re-verified at ea
 | `conf/llm_factories.json` | +1 factory block: `"Cognis"` (cognis-smart / cognis-fast / cognis-embed) | Gate-1 defect 4 / AR-1b: `init_llm_factory()` wipes and reseeds `LLMFactories`/`LLM` from this file at every boot, so a provision-time seed would be deleted on restart — the catalog entry is the upstream-sanctioned seeding path. Without it `POST /v1/llm/set_api_key` (`llm_factory: "Cognis"`) and the `Cognis@cognis-smart` tenant defaults have no rows to bind. Additive JSON; rebases merge clean unless upstream reorders the array head. |
 | `CLAUDE.md` | fork-template replacement (bootstrap) | Docs-only fork governance; recorded at Gate 2 (take-ours on rebase). |
 
+### In-image boot-time overlays (NOT repo edits — zero git fork-diff, but rebase-sensitive)
+
+These mutate upstream-owned files **inside the running image only** (theming spec + Gate 2 verification 2026-06-10). They are anchor-based and fail open: re-verify each at every rebase, with the Playwright branding suite (`cognis/e2e`) as the acceptance gate.
+
+| In-image target | Mechanism | Guard |
+|---|---|---|
+| `/ragflow/web/dist` (`*.js/.html/.svg/.json`) | entrypoint sed: `RAGFlow` → `${COGNIS_PRODUCT_NAME}` (case-sensitive), plus B2 URL re-points (`github.com/infiniflow/ragflow`, `ragflow.io/docs...`, `cloud.ragflow.io...` → `COGNIS_PORTAL_URL`/`COGNIS_DOCS_URL`) | e2e G1–G3 (name) + G5 (hrefs) |
+| `/ragflow/api/utils/web_utils.py` | entrypoint sed of the single literal `"RAGFlow Invitation"` → `"${COGNIS_PRODUCT_NAME} Invitation"`. **Gate 2 hard ceiling:** the only sanctioned server-side Python sed, ever; widening it or sed'ing `api/apps/__init__.py` (B4 fallback) is STRUCK — re-review required | e2e G7 (MailHog subject) |
+| `/ragflow/conf/service_conf.yaml.template` | replaced at build by `cognis-brand-assets/service_conf.cognis.yaml.template` (smtp block env-driven, inert by default) | `tools/check_conf_template_drift.py` in CI (`brand-guard.yml`, `publish-ghcr.yml`) |
+
+All three are gated on `COGNIS_BRANDING=on` (except the template COPY, which is inert without `SMTP_*` env) and preceded by the B6 charset/URL validation of `COGNIS_PRODUCT_NAME`/`COGNIS_DOCS_URL`/`COGNIS_PORTAL_URL` in the entrypoint shim — unsafe values fail the boot instead of corrupting the sed programs.
+
 If a future upstream change introduces a proprietary directory (`/enterprise/`, `/ee/`, `/cloud/`, `/pro/`, `/saas/`, `/platform/`), the license-gate CI will fail; resolve by stripping in a dedicated `chore: strip <dir>` commit on `cognis/main` and adding the path to the rebase bot's modify-delete auto-resolver.
 
 ## Fork-diff target
@@ -75,8 +87,12 @@ What lives on `cognis/main` (and ONLY here):
 - `tools/check_no_proprietary.py` — license allowlist enforcement script
 - `api/cognis/cognis_auth.py` — Clerk JWT validator (Quart `before_request` hook), calls Bridge for `org_id` → RAGFlow `tenant_id` resolution; deny-by-default with a public-route allowlist (SEC-5); mounted from `api/ragflow_server.py` (see ledger)
 - `rag/llm/cognis_provider.py` — "Cognis" factory pinned at `llm.cognisai.com` (the LiteLLM proxy), aliasing upstream's OpenAI-compatible adapters; registered from `rag/llm/__init__.py` (see ledger) and catalogued in `conf/llm_factories.json`
-- `Dockerfile.cognis` — Cognis Knowledge image: brand env + entrypoint shim, `REGISTER_ENABLED=0` default (SEC-5), bakes the fork sources over the upstream base image paths
-- `cognis/e2e/` — Playwright suite against the live :9382 instance (auth posture, branding, core flow)
+- `Dockerfile.cognis` — Cognis Knowledge image: brand env + entrypoint shim (B6-validated, digest-pinned base), `REGISTER_ENABLED=0` default (SEC-5), bakes the fork sources over the upstream base image paths
+- `cognis-brand-assets/` — brand asset staging: `service_conf.cognis.yaml.template` (B3.1 in-image conf shadow); the Cognis Knowledge logo SVG + theme CSS land here when design delivers (B1/B5)
+- `tools/check_conf_template_drift.py` — scripted B3.1 drift gate (Gate 2 condition)
+- `.github/workflows/brand-guard.yml` — runs the drift gate on brand-layer PRs/pushes
+- `.github/workflows/publish-ghcr.yml` — builds `Dockerfile.cognis` → `ghcr.io/cognis-ai/knowledge` on version tags + dispatch (deployment map §4.1; Coolify consumes digests)
+- `cognis/e2e/` — Playwright suite against the live :9382 instance (auth posture, branding incl. G5 href gate + G7 invite-mail subject, core flow)
 - `test/unit_test/api/cognis/` — unit tests for the Clerk hook's deny-by-default contract
 - (future) `web/src/branding/` — Cognis logos + theme overlay
 - (future) Bridge-mediated multi-tenancy: RAGFlow's native `tenant_id` resolves from Bridge's `org_mappings` table

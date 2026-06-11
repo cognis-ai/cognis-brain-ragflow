@@ -3,7 +3,11 @@
 # Wraps upstream RAGFlow with the Cognis Clerk-JWT hook + LiteLLM provider
 # + branding env defaults. Cost-policy: Langfuse points at self-host only.
 # =============================================================================
-FROM infiniflow/ragflow:dev-slim
+# B6 (theming spec / Gate 2 2026-06-10) + knowledge AR-4: dev-slim is a moving
+# tag, so pin by digest — a silent base bump must never change what the boot-time
+# brand pass sees. Digest resolved from Docker Hub for infiniflow/ragflow:dev-slim
+# (linux/amd64) on 2026-06-11; bump deliberately and re-run the branding e2e gate.
+FROM infiniflow/ragflow:dev-slim@sha256:c2bbe41079e48a29982075f4aae5508d9193aa37f83e7fe8edc7319f5af772e2
 
 LABEL maintainer="Cognis AI <support@cognisai.com>"
 LABEL org.opencontainers.image.source="https://github.com/cognis-ai/cognis-brain-ragflow"
@@ -47,6 +51,16 @@ COPY docker/nginx/nginx.conf /etc/nginx/nginx.conf
 COPY docker/nginx/proxy.conf /etc/nginx/proxy.conf
 COPY docker/nginx/ragflow.conf.python /etc/nginx/conf.d/ragflow.conf
 
+# B3.1 (theming spec; Gate 2 APPROVED-WITH-CONDITION): the Cognis copy of the
+# service-conf template shadows the upstream one IN THE IMAGE only (zero git
+# fork-diff — same mechanic as the dist sed). Upstream's docker/entrypoint.sh
+# env-substitutes it at boot, so the smtp sender name / frontend URL stay
+# env-driven (COGNIS_PRODUCT_NAME / COGNIS_SUPPORT_EMAIL / COGNIS_PORTAL_URL).
+# The two templates WILL drift at rebases: tools/check_conf_template_drift.py
+# (CI: .github/workflows/brand-guard.yml + publish-ghcr.yml) fails on any
+# byte-diff outside the marked Cognis regions.
+COPY cognis-brand-assets/service_conf.cognis.yaml.template /ragflow/conf/service_conf.yaml.template
+
 COPY <<'EOF' /ragflow/cognis_entrypoint.sh
 #!/bin/sh
 set -e
@@ -62,10 +76,49 @@ python -c "from rag.llm.cognis_provider import register_cognis_provider; print('
 # and Apache-2.0 attributions live outside web/dist and are never modified.
 if [ "${COGNIS_BRANDING:-}" = "on" ]; then
   COGNIS_NAME="${COGNIS_PRODUCT_NAME:-Cognis Knowledge}"
+  # --- B6 hardening (Gate 2: must run BEFORE any splice below) -------------
+  # COGNIS_NAME and the two URLs are spliced raw into sed programs. Reject
+  # anything that could escape the program (delimiters '/'/'|', backref '&',
+  # escape '\', quotes, whitespace in URLs). tr-based allowlist: delete every
+  # allowed character; anything left over is unsafe. Fail fast and loud — a
+  # corrupted brand pass is worse than no pass.
+  if [ -z "${COGNIS_NAME}" ] || [ -n "$(printf '%s' "${COGNIS_NAME}" | tr -d 'A-Za-z0-9 .-')" ]; then
+    echo "FATAL: unsafe COGNIS_PRODUCT_NAME='${COGNIS_NAME}' (allowed: A-Z a-z 0-9 space . -)" >&2
+    exit 1
+  fi
+  for pair in "COGNIS_DOCS_URL=${COGNIS_DOCS_URL:-}" "COGNIS_PORTAL_URL=${COGNIS_PORTAL_URL:-}"; do
+    name="${pair%%=*}"
+    val="${pair#*=}"
+    case "$val" in
+      http://*|https://*) ;;
+      *) echo "FATAL: ${name} must be an http(s) URL (got '${val}')" >&2; exit 1;;
+    esac
+    if [ -n "$(printf '%s' "${val}" | tr -d 'A-Za-z0-9:/._~?#=%-')" ]; then
+      echo "FATAL: unsafe character in ${name}='${val}' (no '|', '&', '\\', quotes or spaces)" >&2
+      exit 1
+    fi
+  done
   # *.json covers conf.json — the runtime config whose appName feeds the
   # navbar wordmark (<span class="appName...">{o.appName}</span>).
   grep -rl --include='*.js' --include='*.html' --include='*.svg' --include='*.json' 'RAGFlow' /ragflow/web/dist 2>/dev/null \
     | while read -r f; do sed -i "s/RAGFlow/${COGNIS_NAME}/g" "$f"; done
+  # --- B2: re-point upstream outbound links at Cognis surfaces -------------
+  # Lowercase URLs are immune to the display-name pass above. Deep upstream
+  # doc links deliberately collapse to the Cognis docs root — no slug mapping
+  # in shell. Guarded by the e2e href gate (G5 in branding.spec.ts): these
+  # seds are anchor-based and fail open on rebase.
+  grep -rl --include='*.js' 'ragflow\.io\|github\.com/infiniflow/ragflow' /ragflow/web/dist 2>/dev/null \
+    | while read -r f; do
+        sed -i "s|https://github.com/infiniflow/ragflow|${COGNIS_PORTAL_URL}|g; s|https://ragflow\.io/docs[^\"' )]*|${COGNIS_DOCS_URL}|g; s|https://cloud\.ragflow\.io[^\"' )]*|${COGNIS_PORTAL_URL}|g" "$f"
+      done
+  # --- B3.2: invite-mail subject (Gate 2 HARD CEILING) ---------------------
+  # The ONLY sanctioned server-side Python sed: one exact display-string
+  # literal, no logic. It fails open (silent no-op if a rebase moves the
+  # string), so the G7 MailHog subject assertion ships in the same change
+  # (cognis/e2e/tests/branding.spec.ts). Gate 2 2026-06-10: this is a hard
+  # ceiling, NOT a precedent — no further Python seds without re-review, and
+  # /ragflow/api/apps/__init__.py must NEVER be sed'ed (B4 fallback STRUCK).
+  sed -i "s/RAGFlow Invitation/${COGNIS_NAME} Invitation/" /ragflow/api/utils/web_utils.py
   echo "cognis branding applied to web dist (${COGNIS_NAME})"
 fi
 exec /ragflow/entrypoint.sh "$@"
