@@ -41,6 +41,11 @@ from common.log_utils import init_root_logger
 from agent.plugin import GlobalPluginManager
 from rag.utils.redis_conn import RedisDistributedLock
 
+# Cognis fork: mount the Clerk-JWT hook (no-op unless JWT_PUBLIC_KEY_URL is set).
+from api.cognis.cognis_auth import register_cognis_auth
+
+register_cognis_auth(app)
+
 stop_event = threading.Event()
 
 RAGFLOW_DEBUGPY_LISTEN = int(os.environ.get('RAGFLOW_DEBUGPY_LISTEN', "0"))

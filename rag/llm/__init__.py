@@ -198,3 +198,9 @@ __all__ = [
     "TTSModel",
     "OcrModel",
 ]
+
+# Cognis fork: register the "Cognis" factory in every process that loads the
+# model registries (API server + task executors). See rag/llm/cognis_provider.py.
+from rag.llm.cognis_provider import register_cognis_provider as _register_cognis_provider  # noqa: E402
+
+_register_cognis_provider()

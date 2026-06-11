@@ -39,7 +39,18 @@ The doctrine prior to this fork's bootstrap flagged a concern about a possible "
 
 ## Bootstrap state
 
-This fork's `cognis/main` is `vendor/upstream` + a single `chore: cognis-brain-ragflow fork bootstrap` commit dropping in fork templates. No upstream files have been modified. No directories stripped — upstream is single-license Apache-2.0 with no trap directories.
+This fork's `cognis/main` is `vendor/upstream` + a single `chore: cognis-brain-ragflow fork bootstrap` commit dropping in fork templates. No directories stripped — upstream is single-license Apache-2.0 with no trap directories. Upstream-file edits made since bootstrap are logged in the ledger below.
+
+## Upstream-file edit ledger (`fork:` commits — keep current)
+
+Every entry must stay minimal, carry its justification, and be re-verified at each rebase. Per fork-ops, Cognis-specific changes are NOT upstreamed; these are all Cognis-specific wiring with no generic value to infiniflow/ragflow.
+
+| File | Edit | Why (and why no additive mechanism exists) |
+|---|---|---|
+| `api/ragflow_server.py` | +3 lines: import + `register_cognis_auth(app)` mount | Gate-1 defect 5 / AR-13: the Clerk hook must be installed on the in-process Quart app before serving. Gate 2 struck boot-time seds of server Python as forbidden, and a subprocess `python -c` cannot mutate the server process — the app-init module is the only sanctioned mount point (sso-engineering-spec §4.6 directs exactly this line). Env-gated: no-op unless `JWT_PUBLIC_KEY_URL` is set. |
+| `rag/llm/__init__.py` | +5 lines at EOF: import + `register_cognis_provider()` | Gate-1 defect 4 / AR-1a: the `ChatModel`/`EmbeddingModel` dicts are per-process; registration must run inside every server/executor that imports `rag.llm`. This is the wire-up the provider's own docstring specifies; the previous `Dockerfile.cognis` subprocess registration was discarded at exec. Idempotent; rebase conflict surface is the file tail only. |
+| `conf/llm_factories.json` | +1 factory block: `"Cognis"` (cognis-smart / cognis-fast / cognis-embed) | Gate-1 defect 4 / AR-1b: `init_llm_factory()` wipes and reseeds `LLMFactories`/`LLM` from this file at every boot, so a provision-time seed would be deleted on restart — the catalog entry is the upstream-sanctioned seeding path. Without it `POST /v1/llm/set_api_key` (`llm_factory: "Cognis"`) and the `Cognis@cognis-smart` tenant defaults have no rows to bind. Additive JSON; rebases merge clean unless upstream reorders the array head. |
+| `CLAUDE.md` | fork-template replacement (bootstrap) | Docs-only fork governance; recorded at Gate 2 (take-ours on rebase). |
 
 If a future upstream change introduces a proprietary directory (`/enterprise/`, `/ee/`, `/cloud/`, `/pro/`, `/saas/`, `/platform/`), the license-gate CI will fail; resolve by stripping in a dedicated `chore: strip <dir>` commit on `cognis/main` and adding the path to the rebase bot's modify-delete auto-resolver.
 
@@ -62,8 +73,11 @@ What lives on `cognis/main` (and ONLY here):
 - `.github/workflows/license-gate.yml` — ScanCode allowlist enforcement
 - `.github/workflows/upstream-rebase.yml` — nightly rebase bot (currently dormant)
 - `tools/check_no_proprietary.py` — license allowlist enforcement script
-- (future) `api/cognis/cognis_auth.py` — Clerk JWT validator, calls Bridge for `org_id` → RAGFlow `tenant_id` resolution
-- (future) `rag/llm/cognis_provider.py` — OpenAI-compatible provider pinned at `llm.cognisai.com` (the LiteLLM proxy); replaces direct OpenAI / Anthropic / Cohere calls
+- `api/cognis/cognis_auth.py` — Clerk JWT validator (Quart `before_request` hook), calls Bridge for `org_id` → RAGFlow `tenant_id` resolution; deny-by-default with a public-route allowlist (SEC-5); mounted from `api/ragflow_server.py` (see ledger)
+- `rag/llm/cognis_provider.py` — "Cognis" factory pinned at `llm.cognisai.com` (the LiteLLM proxy), aliasing upstream's OpenAI-compatible adapters; registered from `rag/llm/__init__.py` (see ledger) and catalogued in `conf/llm_factories.json`
+- `Dockerfile.cognis` — Cognis Knowledge image: brand env + entrypoint shim, `REGISTER_ENABLED=0` default (SEC-5), bakes the fork sources over the upstream base image paths
+- `cognis/e2e/` — Playwright suite against the live :9382 instance (auth posture, branding, core flow)
+- `test/unit_test/api/cognis/` — unit tests for the Clerk hook's deny-by-default contract
 - (future) `web/src/branding/` — Cognis logos + theme overlay
 - (future) Bridge-mediated multi-tenancy: RAGFlow's native `tenant_id` resolves from Bridge's `org_mappings` table
 

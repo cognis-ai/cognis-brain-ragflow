@@ -18,10 +18,26 @@ ENV COGNIS_BRANDING=on \
     COGNIS_SUPPORT_EMAIL="support@cognisai.com" \
     COGNIS_LLM_GATEWAY="https://llm.cognisai.com/v1"
 
-# Bake the Cognis subpackages into the upstream paths so import works
-# without modifying upstream PYTHONPATH.
+# SEC-5: native self-signup is OFF in every Cognis deploy (sso spec §4.6).
+# Env-gated and reversible per AR-3 — override at compose level, never in code.
+ENV REGISTER_ENABLED=0
+
+# Bake the Cognis layer into the upstream paths so import works without
+# modifying upstream PYTHONPATH. Wiring (Gate-1 defects 4+5) lives IN the
+# fork sources, not in this image:
+#   - rag/llm/__init__.py calls register_cognis_provider() at the end of its
+#     registry build → the "Cognis" factory exists in every server/executor
+#     process (the old `python -c` subprocess registration was discarded).
+#   - api/ragflow_server.py mounts register_cognis_auth(app) → the Clerk hook
+#     activates when JWT_PUBLIC_KEY_URL is set (deny-by-default; SEC-5).
+#   - conf/llm_factories.json carries the "Cognis" factory entry that
+#     init_llm_factory() seeds into LLMFactories/LLM at boot.
+# So the three forked upstream files must overwrite the baked-in copies.
 COPY api/cognis /ragflow/api/cognis
+COPY api/ragflow_server.py /ragflow/api/ragflow_server.py
+COPY rag/llm/__init__.py /ragflow/rag/llm/__init__.py
 COPY rag/llm/cognis_provider.py /ragflow/rag/llm/cognis_provider.py
+COPY conf/llm_factories.json /ragflow/conf/llm_factories.json
 
 # Web UI: upstream's compose bind-mounts these nginx configs into the
 # container; our platform compose doesn't, so without them nginx serves the
@@ -31,16 +47,13 @@ COPY docker/nginx/nginx.conf /etc/nginx/nginx.conf
 COPY docker/nginx/proxy.conf /etc/nginx/proxy.conf
 COPY docker/nginx/ragflow.conf.python /etc/nginx/conf.d/ragflow.conf
 
-# Note: upstream's ragflow_server.py needs ONE line added to wire the
-# Cognis auth hook + LLM factory. We do it via an entrypoint shim so the
-# upstream file stays untouched (no fork-diff in app source).
 COPY <<'EOF' /ragflow/cognis_entrypoint.sh
 #!/bin/sh
 set -e
-# Wire Cognis auth + LLM provider into the running app without editing
-# upstream sources. Runs once per pod boot.
-python -c "from api.cognis.cognis_auth import register_cognis_auth; print('cognis_auth ready')"
-python -c "from rag.llm.cognis_provider import register_cognis_provider; register_cognis_provider(); print('cognis_provider registered')"
+# Boot-time smoke checks: fail fast if the Cognis layer cannot import in
+# this image (the real wiring is in the fork sources COPY'd above).
+python -c "from api.cognis.cognis_auth import register_cognis_auth; print('cognis_auth importable')"
+python -c "from rag.llm.cognis_provider import register_cognis_provider; print('cognis_provider importable')"
 # Brand the prebuilt web bundle in place instead of rebuilding it: rewrite
 # the display name (title/wordmark/UI copy) in the dist before nginx starts.
 # Case-sensitive 'RAGFlow' only matches display strings (verified: i18n copy,
