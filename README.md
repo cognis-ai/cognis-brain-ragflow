@@ -1,3 +1,7 @@
+# DEPRECATED ⚰️
+
+This soft-fork is retired. Use the consolidated cognis-brain product (vLLM pinned image + reused Voice RAG + deferred Axolotl) instead.
+
 <div align="center">
 <a href="https://cloud.ragflow.io/">
 <img src="web/src/assets/logo-with-text.svg" width="520" alt="ragflow logo">
